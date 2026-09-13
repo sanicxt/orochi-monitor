@@ -1,0 +1,8 @@
+# build artifacts
+/orochictl
+extension/schemas/gschemas.compiled
+
+# editor/OS noise
+*.swp
+*~
+.DS_Store

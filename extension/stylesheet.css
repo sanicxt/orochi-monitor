@@ -1,0 +1,16 @@
+.orochi-v2-box {
+    spacing: 3px;
+}
+
+#panel .panel-button .orochi-v2-box .system-status-icon {
+    padding: 0;
+    margin: 0;
+}
+
+.orochi-v2-label {
+    font-feature-settings: "tnum";
+}
+
+.orochi-v2-error {
+    color: #e01b24;
+}

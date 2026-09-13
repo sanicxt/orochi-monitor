@@ -1,0 +1,72 @@
+<schemalist>
+  <schema id="org.gnome.shell.extensions.orochi-v2-control"
+          path="/org/gnome/shell/extensions/orochi-v2-control/">
+    <key name="helper-path" type="s">
+      <default>''</default>
+      <summary>Path to orochictl helper</summary>
+      <description>
+        Absolute path to the orochictl helper binary. Leave empty to
+        look next to this extension's directory.
+      </description>
+    </key>
+    <key name="refresh-interval" type="i">
+      <default>300</default>
+      <range min="0" max="3600"/>
+      <summary>Refresh interval in seconds</summary>
+      <description>
+        How often the panel label fetches battery state, in seconds.
+        Set to 0 to disable automatic refreshing.
+      </description>
+    </key>
+    <key name="show-battery-label" type="b">
+      <default>true</default>
+      <summary>Show battery percentage next to the icon</summary>
+      <description>
+        Whether the battery percentage is displayed in the top bar next
+        to the mouse icon.
+      </description>
+    </key>
+    <key name="show-dpi" type="b">
+      <default>true</default>
+      <summary>Show DPI in the menu</summary>
+      <description>Whether the DPI section is shown in the menu.</description>
+    </key>
+    <key name="show-poll" type="b">
+      <default>true</default>
+      <summary>Show polling rate in the menu</summary>
+      <description>Whether the polling rate section is shown in the menu.</description>
+    </key>
+    <key name="notify-low-battery" type="b">
+      <default>true</default>
+      <summary>Notify when the battery is low</summary>
+      <description>
+        Send a desktop notification when the mouse battery drops to or
+        below the configured threshold.
+      </description>
+    </key>
+    <key name="battery-threshold" type="i">
+      <default>20</default>
+      <range min="5" max="50"/>
+      <summary>Low battery threshold</summary>
+      <description>
+        Battery percentage at which the low battery notification is sent.
+      </description>
+    </key>
+    <key name="dpi-presets" type="s">
+      <default>'800;1600;3200'</default>
+      <summary>DPI presets</summary>
+      <description>
+        Semicolon separated list of DPI values, for example 800;1600;3200.
+        Each preset is applied to both axes.
+      </description>
+    </key>
+    <key name="dpi" type="i">
+      <default>1600</default>
+      <range min="100" max="18000"/>
+      <summary>Custom DPI</summary>
+      <description>
+        Custom DPI value configured from the preferences window.
+      </description>
+    </key>
+  </schema>
+</schemalist>

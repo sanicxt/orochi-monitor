@@ -1,0 +1,10 @@
+{
+  "name": "Orochi Monitor",
+  "description": "Battery, DPI and polling rate control for the Razer Orochi V2 mouse using a bundled helper - no OpenRazer needed.",
+  "uuid": "orochi-v2-control@sanic.github.io",
+  "shell-version": ["48", "49", "50"],
+  "gettext-domain": "orochi-v2-control",
+  "settings-schema": "org.gnome.shell.extensions.orochi-v2-control",
+  "version-name": "1.0.0",
+  "url": "https://github.com/sanicxt/orochi-monitor"
+}

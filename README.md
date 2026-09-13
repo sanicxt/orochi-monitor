@@ -7,26 +7,6 @@ The Orochi V2 speaks Razer's HID control protocol. This project talks to it
 directly through `/dev/hidraw`, so there is no kernel module, no DKMS, no
 daemon and no DBus service.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  GNOME top bar:   [mouse icon] 96%                        │
-│                                                          │
-│  Menu:            Battery: 96%                           │
-│                   DPI: 800              ▸                │
-│                     • 800                                │
-│                     • 1600                               │
-│                     • 3200                               │
-│                     • Custom (2400)                      │
-│                   Poll: 1000 Hz         ▸                │
-│                     • 125 Hz                             │
-│                     • 500 Hz                             │
-│                     • 1000 Hz                            │
-│                   ─────────────────────                  │
-│                   Refresh now                            │
-│                   Preferences                            │
-└──────────────────────────────────────────────────────────┘
-```
-
 ## Features
 
 - **Top bar indicator** — mouse icon with a live battery percentage

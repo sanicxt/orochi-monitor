@@ -22,6 +22,7 @@ const UDEV_RULE_PATH = '/etc/udev/rules.d/99-razer-orochi-v2.rules';
 
 export default class OrochiV2Extension extends Extension {
     enable() {
+        this._disabled = false;
         this._settings = this.getSettings();
         this._helperPath = this._resolveHelper();
         this._cancellable = new Gio.Cancellable();
@@ -29,6 +30,12 @@ export default class OrochiV2Extension extends Extension {
         this._refreshing = false;
         this._notificationSource = null;
         this._batteryNotified = false;
+        this._batteryRefreshing = false;
+        this._retryDelay = 0;
+        this._scheduledId = null;
+        this._idleWatchId = null;
+        this._dbusSubId = null;
+        this._devMonitor = null;
 
         this._indicator = new PanelMenu.Button(0.5, this.metadata.name, false);
 
@@ -64,14 +71,47 @@ export default class OrochiV2Extension extends Extension {
                 this._refreshAll();
         });
 
+        this._settings.connectObject(
+            'changed::refresh-interval', () => this._startTimer(),
+            'changed::show-dpi', () => this._updateSectionVisibility(),
+            'changed::show-poll', () => this._updateSectionVisibility(),
+            this);
+
         Main.panel.addToStatusArea(this.uuid, this._indicator);
+
+        // Watch for wake-ups so a sleeping mouse can be re-read promptly.
+        this._watchIdleMonitor();
+        this._watchSession();
+        this._watchDevices();
 
         this._startTimer();
         this._refreshBattery();
     }
 
     disable() {
+        this._disabled = true;
         this._stopTimer();
+
+        this._settings?.disconnectObject(this);
+
+        if (this._scheduledId) {
+            GLib.Source.remove(this._scheduledId);
+            this._scheduledId = null;
+        }
+
+        if (this._idleWatchId && this._idleMonitor) {
+            this._idleMonitor.remove_watch(this._idleWatchId);
+            this._idleWatchId = null;
+        }
+        this._idleMonitor = null;
+
+        if (this._dbusSubId) {
+            Gio.DBus.system.signal_unsubscribe(this._dbusSubId);
+            this._dbusSubId = null;
+        }
+
+        this._devMonitor?.cancel();
+        this._devMonitor = null;
 
         this._cancellable?.cancel();
         this._cancellable = null;
@@ -83,6 +123,93 @@ export default class OrochiV2Extension extends Extension {
         this._indicator = null;
         this._label = null;
         this._settings = null;
+    }
+
+    /*
+     * The mouse sleeps when idle; on wake it needs a moment before it
+     * answers HID requests. Re-read the battery whenever the user becomes
+     * active again, with a short delay for the device to wake up.
+     */
+    _watchIdleMonitor() {
+        this._idleMonitor = global.backend.get_core_idle_monitor();
+
+        this._idleWatchId = this._idleMonitor.add_user_active_watch(() => {
+            this._idleWatchId = null;
+            this._scheduleBatteryRefresh(1500, true);
+            this._watchIdleMonitor();
+        });
+    }
+
+    /*
+     * Refresh shortly after the machine resumes from suspend.
+     */
+    _watchSession() {
+        try {
+            this._dbusSubId = Gio.DBus.system.signal_subscribe(
+                'org.freedesktop.login1',
+                'org.freedesktop.login1.Manager',
+                'PrepareForSleep',
+                '/org/freedesktop/login1',
+                null,
+                Gio.DBusSignalFlags.NONE,
+                (connection, sender, path, iface, signal, params) => {
+                    const [sleeping] = params.deepUnpack();
+
+                    if (!sleeping)
+                        this._scheduleBatteryRefresh(3000, true);
+                });
+        } catch (e) {
+            logError(e, 'orochi-monitor: failed to watch login1');
+        }
+    }
+
+    /*
+     * The receiver may be plugged in after the shell started, or replugged
+     * after a suspend. Watch /sys/class/hidraw for device changes.
+     */
+    _watchDevices() {
+        const dir = Gio.File.new_for_path('/sys/class/hidraw');
+
+        try {
+            this._devMonitor = dir.monitor_directory(
+                Gio.FileMonitorFlags.NONE, null);
+        } catch (e) {
+            logError(e, 'orochi-monitor: failed to watch hidraw devices');
+            return;
+        }
+
+        this._devMonitor.connect('changed', () => {
+            this._scheduleBatteryRefresh(2000, true);
+        });
+    }
+
+    /*
+     * Schedule a battery refresh, collapsing bursts (idle wake, udev
+     * events, resume) into a single helper invocation.
+     *
+     * Event-driven calls pass a short delay and take priority over a
+     * pending (much longer) backoff retry so plugging the mouse back in
+     * or waking the machine is reflected immediately.
+     */
+    _scheduleBatteryRefresh(delay, urgent = false) {
+        if (this._disabled)
+            return;
+
+        if (this._scheduledId) {
+            if (!urgent)
+                return;
+
+            GLib.Source.remove(this._scheduledId);
+            this._scheduledId = null;
+        }
+
+        this._scheduledId = GLib.timeout_add_once(
+            GLib.PRIORITY_DEFAULT, delay, () => {
+                this._scheduledId = null;
+                this._refreshBattery();
+            });
+        GLib.Source.set_name_by_id(this._scheduledId,
+            '[orochi-monitor] refresh battery');
     }
 
     _resolveHelper() {
@@ -142,16 +269,27 @@ export default class OrochiV2Extension extends Extension {
 
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        if (this._settings.get_boolean('show-dpi'))
-            this._buildDpiMenu(menu);
+        this._buildDpiMenu(menu);
+        this._buildPollMenu(menu);
 
-        if (this._settings.get_boolean('show-poll'))
-            this._buildPollMenu(menu);
+        this._updateSectionVisibility();
 
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         menu.addAction(_('Refresh now'), () => this._refreshAll());
         menu.addAction(_('Preferences'), () => this.openPreferences());
+    }
+
+    _updateSectionVisibility() {
+        if (this._dpiSection) {
+            this._dpiSection.visible =
+                this._settings.get_boolean('show-dpi');
+        }
+
+        if (this._pollSection) {
+            this._pollSection.visible =
+                this._settings.get_boolean('show-poll');
+        }
     }
 
     _buildDpiMenu(menu) {
@@ -292,13 +430,26 @@ export default class OrochiV2Extension extends Extension {
     }
 
     _refreshBattery() {
+        if (this._batteryRefreshing)
+            return;
+
+        this._batteryRefreshing = true;
+
         this._runHelper(['status', 'battery'])
             .then(output => {
-                const status = this._parseStatus(output);
-
-                if (status.battery == null)
+                if (this._disabled)
                     return;
 
+                const status = this._parseStatus(output);
+
+                if (status.battery == null) {
+                    // The device did not answer, usually because it is
+                    // asleep. Retry with backoff instead of going stale.
+                    this._scheduleBatteryRetry();
+                    return;
+                }
+
+                this._retryDelay = 0;
                 this._status.battery = status.battery;
 
                 if (this._label)
@@ -310,7 +461,40 @@ export default class OrochiV2Extension extends Extension {
 
                 this._checkBatteryLevel(status.battery);
             })
-            .catch(e => this._showError(e.message));
+            .catch(e => {
+                if (this._disabled)
+                    return;
+
+                this._showError(e.message);
+
+                if (this._isTransientError(e.message))
+                    this._scheduleBatteryRetry();
+            })
+            .finally(() => {
+                this._batteryRefreshing = false;
+            });
+    }
+
+    /*
+     * Retry a failed/empty battery read with exponential backoff (4s, 8s,
+     * 16s, ... capped at 60s). Gives the mouse time to wake up.
+     */
+    _scheduleBatteryRetry() {
+        if (this._scheduledId || this._disabled || this._cancellable === null)
+            return;
+
+        this._retryDelay = this._retryDelay
+            ? Math.min(this._retryDelay * 2, 60000)
+            : 4000;
+
+        this._scheduleBatteryRefresh(this._retryDelay);
+    }
+
+    _isTransientError(message) {
+        return message.includes('not found') ||
+            message.includes('device=') ||
+            message.includes('timed out') ||
+            message.includes('Input/output error');
     }
 
     _checkBatteryLevel(percent) {
@@ -369,10 +553,16 @@ export default class OrochiV2Extension extends Extension {
 
         this._runHelper(['status'])
             .then(output => {
+                if (this._disabled)
+                    return;
+
                 this._status = this._parseStatus(output);
                 this._updateMenu();
             })
-            .catch(e => this._showError(e.message))
+            .catch(e => {
+                if (!this._disabled)
+                    this._showError(e.message);
+            })
             .finally(() => {
                 this._refreshing = false;
             });
@@ -381,19 +571,31 @@ export default class OrochiV2Extension extends Extension {
     _applyDpi(dpi) {
         this._runHelper(['dpi', String(dpi)])
             .then(() => {
+                if (this._disabled)
+                    return;
+
                 this._status.dpi = {x: dpi, y: dpi};
                 this._updateMenu();
             })
-            .catch(e => this._showError(e.message));
+            .catch(e => {
+                if (!this._disabled)
+                    this._showError(e.message);
+            });
     }
 
     _applyPoll(rate) {
         this._runHelper(['poll', String(rate)])
             .then(() => {
+                if (this._disabled)
+                    return;
+
                 this._status.poll = rate;
                 this._updateMenu();
             })
-            .catch(e => this._showError(e.message));
+            .catch(e => {
+                if (!this._disabled)
+                    this._showError(e.message);
+            });
     }
 
     _updateMenu() {
@@ -439,15 +641,21 @@ export default class OrochiV2Extension extends Extension {
     }
 
     _showError(message) {
+        if (!this._errorItem)
+            return;
+
         this._errorItem.label.text = message;
         this._errorItem.visible = true;
 
-        const denied = message.includes('Permission denied') ||
-            message.includes('Permission denied opening hidraw');
-
+        const denied = message.includes('Permission denied');
         this._grantItem.visible = denied;
-        this._label.text = 'n/a';
-        this._batteryItem.label.text = _('Battery: unavailable');
+
+        // Keep the last known battery reading on transient failures so the
+        // panel does not flicker to "n/a" while the mouse is asleep.
+        if (denied || this._status.battery == null) {
+            this._label.text = 'n/a';
+            this._batteryItem.label.text = _('Battery: unavailable');
+        }
     }
 
     _installUdevRule() {

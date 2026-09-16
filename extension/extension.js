@@ -18,7 +18,8 @@ const MIN_DPI = 100;
 const MAX_DPI = 18000;
 const POLL_RATES = [125, 500, 1000];
 
-const UDEV_RULE_PATH = '/etc/udev/rules.d/99-razer-orochi-v2.rules';
+const UDEV_RULE_PATH = '/etc/udev/rules.d/70-razer-orochi-v2.rules';
+const UDEV_RULE_PATH_OLD = '/etc/udev/rules.d/99-razer-orochi-v2.rules';
 
 export default class OrochiV2Extension extends Extension {
     enable() {
@@ -659,15 +660,27 @@ export default class OrochiV2Extension extends Extension {
     }
 
     _installUdevRule() {
+        /*
+         * The rule file must sort before 73-seat-late.rules, which only
+         * queues the "uaccess" builtin when the tag is already set at that
+         * point. A 99- rule adds the tag too late, so no ACL is applied on
+         * a cold boot and the device stays root-only.
+         *
+         * GROUP="plugdev" is a fallback for systems where the ACL is not
+         * applied; MODE="0660" keeps it from being world-readable.
+         */
         const rule = 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ' +
-            'ATTRS{idProduct}=="0094", TAG+="uaccess"\n' +
+            'ATTRS{idProduct}=="0094", MODE="0660", GROUP="plugdev", ' +
+            'TAG+="uaccess"\n' +
             'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ' +
-            'ATTRS{idProduct}=="0095", TAG+="uaccess"';
+            'ATTRS{idProduct}=="0095", MODE="0660", GROUP="plugdev", ' +
+            'TAG+="uaccess"';
 
         const script =
             `printf '%s\\n' '${rule}' > ${UDEV_RULE_PATH} && ` +
+            `rm -f ${UDEV_RULE_PATH_OLD} && ` +
             'udevadm control --reload-rules && ' +
-            'udevadm trigger --action=change --subsystem-match=hidraw';
+            'udevadm trigger --action=add --subsystem-match=hidraw';
 
         try {
             Gio.Subprocess.new(['pkexec', 'sh', '-c', script],

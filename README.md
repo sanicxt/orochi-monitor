@@ -98,23 +98,37 @@ whether to **update** or **remove**. Non-interactive flags:
 ### Permissions
 
 `/dev/hidraw*` is root-only by default. The install script (or the
-**"Install udev rule for hidraw access…"** item in the extension menu) can
-install this rule, which grants the active local user access via `uaccess`:
+**"Install udev rule for hidraw access…"** item in the extension menu)
+installs this rule:
 
 ```
-# /etc/udev/rules.d/99-razer-orochi-v2.rules
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0094", TAG+="uaccess"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0095", TAG+="uaccess"
+# /etc/udev/rules.d/70-razer-orochi-v2.rules
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0094", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0095", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 ```
 
-Reload it manually with:
+Two details matter here:
+
+- **The file must be named `70-…`, not `99-…`.** `uaccess` ACLs are applied
+  by `RUN{builtin}+="uaccess"` in `/usr/lib/udev/rules.d/73-seat-late.rules`,
+  and that line only runs when the `uaccess` tag is *already set at that
+  point*. A `99-` rule adds the tag after the check, so the device is left
+  root-only on a cold boot — even though it works when the rule is first
+  installed (the tag gets cached in `/run/udev/data/`). This is why the
+  permission appears to break after every reboot.
+- `GROUP="plugdev"` is a fallback for systems where the ACL is not applied
+  (`plugdev` exists on Debian/Ubuntu/Fedora and contains the desktop user).
+
+Apply it without a reboot:
 
 ```sh
 sudo udevadm control --reload-rules
-sudo udevadm trigger --action=change --subsystem-match=hidraw
+sudo udevadm trigger --action=add --subsystem-match=hidraw
 ```
 
-If access is still denied, unplug/replug the receiver or reboot.
+The rule lives in `/etc` and needs no reinstalling, including after kernel
+updates — the kernel version is irrelevant to udev rules. Reinstalling with
+the script also removes any stale late-ordered `99-razer-orochi-v2.rules`.
 
 ### Uninstall
 
@@ -189,7 +203,22 @@ The UUID has no trailing dot.
 GNOME Shell caches extension modules for the session. Log out and back in.
 
 **`Permission denied opening hidraw device(s)`**
-Install the udev rule above, then re-trigger udev or replug the receiver.
+Make sure the rule is named `70-razer-orochi-v2.rules` (see
+[Permissions](#permissions)) and reinstall it with `./install.sh`, then:
+
+```sh
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=add --subsystem-match=hidraw
+```
+
+**Permission works, then breaks after every reboot**
+A `99-`-ordered `uaccess` rule. Rename it to `70-razer-orochi-v2.rules`; see
+[Permissions](#permissions) for why the ordering matters.
+
+**After a kernel update**
+udev rules in `/etc` are independent of the kernel, so nothing special is
+needed. If access breaks anyway, re-run `./install.sh` (it reinstalls the
+rule and removes stale ones).
 
 **`Razer Orochi V2 (1532:0094/0095) not found`**
 Check `lsusb | grep 1532` — the receiver should show up as `1532:0094`.

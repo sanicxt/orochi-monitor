@@ -15,7 +15,8 @@ set -euo pipefail
 UUID="orochi-v2-control@sanic.github.io"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID"
-UDEV_RULE="/etc/udev/rules.d/99-razer-orochi-v2.rules"
+UDEV_RULE="/etc/udev/rules.d/70-razer-orochi-v2.rules"
+UDEV_RULE_OLD="/etc/udev/rules.d/99-razer-orochi-v2.rules"
 VERSION="1.0.0"
 NEED_LOGOUT=0
 
@@ -75,24 +76,39 @@ PY
 
 install_udev() {
     say "Installing udev rule for Razer Orochi V2 (1532:0094, 1532:0095)"
+    say "  $UDEV_RULE"
+
+    # Must sort before 73-seat-late.rules, which only queues the uaccess
+    # builtin when the tag is already set. GROUP="plugdev" is a fallback
+    # for systems where the uaccess ACL is not applied.
     sudo tee "$UDEV_RULE" > /dev/null <<'EOF'
 # Razer Orochi V2 - hidraw access for the desktop user
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0094", TAG+="uaccess"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0095", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0094", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0095", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 EOF
+
+    # Remove a stale late-ordered rule from older installs, otherwise both
+    # apply and the ordering fix is ineffective.
+    if [[ -f "$UDEV_RULE_OLD" ]]; then
+        sudo rm -f "$UDEV_RULE_OLD"
+    fi
+
     sudo udevadm control --reload-rules
-    sudo udevadm trigger --action=change --subsystem-match=hidraw
+    sudo udevadm trigger --action=add --subsystem-match=hidraw
     say "udev rule installed"
 }
 
 remove_udev() {
-    if [[ ! -f "$UDEV_RULE" ]]; then
-        return
-    fi
+    local removed=0
 
-    read -rp "Remove udev rule $UDEV_RULE? [y/N] " answer
-    if [[ "$answer" =~ ^[Yy]$ ]]; then
-        sudo rm -f "$UDEV_RULE"
+    for rule in "$UDEV_RULE" "$UDEV_RULE_OLD"; do
+        if [[ -f "$rule" ]]; then
+            sudo rm -f "$rule"
+            removed=1
+        fi
+    done
+
+    if [[ $removed -eq 1 ]]; then
         sudo udevadm control --reload-rules
         say "udev rule removed"
     fi
